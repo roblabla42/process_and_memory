@@ -116,11 +116,17 @@ SYSCALL_DEFINE2(get_pid_info, struct pid_info __user *, ref, int, pid)
 	info = kmalloc(sizeof(struct pid_info), GFP_KERNEL);
 	if (info == NULL) {
 		res = -ENOMEM;
+		goto cleanup2;
+	}
+	if (copy_from_user(info, ref, sizeof(struct pid_info)) != 0) {
+		res = -EINVAL;
 		goto cleanup;
 	}
+
 	info->pid = task_pid_vnr(task);
 	info->state = task->state;
 	info->age = ktime_get_ns() - task->start_time;
+
 	/*
 	 * Here, task_pid_vnr takes care of the synchronization through RCU lock.
 	 *
