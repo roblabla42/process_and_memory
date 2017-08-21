@@ -27,7 +27,7 @@ struct pid_info {
 
 long	get_pid_info(struct pid_info *ret, int pid)
 {
-	return syscall(332, ret, pid);
+	return syscall(350, ret, pid);
 }
 
 const char *str_from_task_state(long long state)
