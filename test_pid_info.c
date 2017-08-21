@@ -3,14 +3,23 @@
 #include <unistd.h>
 #include <limits.h>
 
+/* All the fields are out (meaning they can be uninitialized when sent to the
+ * kernel), except for children/childrenlen. The user should initialize it to an
+ * array of their choice, and give the pointer to the kernelspace along with its
+ * size.
+ *
+ * The kernel will then fill the array with the pid list, and adjust childrenlen
+ * accordingly. If childrenlen is the same before and after the syscall, you
+ * probably want to make the array bigger and call the syscall again.
+ */
 struct pid_info {
 	int pid;
 	int state;
 	size_t stacklen;
 	char *stack;
 	unsigned long long age;
-	// TODO: Figure out a good maxlen for children
-	int children[128];
+	size_t childrenlen;
+	int *children;
 	int parent_pid;
 	char path[PATH_MAX];
 	char pwd[PATH_MAX];
@@ -108,10 +117,63 @@ void hexDump (char *desc, void *addr, int len) {
 	printf ("  %s\n", buff);
 }
 
+void space_pad(int depth) {
+	while (depth--) {
+		putchar(' ');
+	}
+}
+
+int process_pid(int pid, int process_children, int process_parent, int process_stack, int depth) {
+	char name[1024];
+	struct pid_info ret = {0};
+	int i = 64;
+
+	do {
+		// Free on null is a NOOP
+		free(ret.children);
+		ret.childrenlen = i = i * 2;
+		ret.children = malloc(sizeof(int) * i);
+		if (ret.children == NULL) {
+			perror("malloc");
+			return 1;
+		}
+		if (get_pid_info(&ret, pid)) {
+			perror("get_pid_info");
+			printf("Failed on %d\n", pid);
+			return 1;
+		}
+	} while (ret.childrenlen == i);
+	space_pad(depth);
+	printf("- %s(%d) - %s, uptime: %llums, path: %.*s, pwd: %.*s\n",
+		get_process_name_by_pid(ret.pid, name), ret.pid,
+		str_from_task_state(ret.state), ret.age / 1000000, PATH_MAX, ret.path,
+		PATH_MAX, ret.pwd);
+	if (process_stack) {
+		hexDump("stack", ret.stack, ret.stacklen);
+	}
+	if (process_parent && ret.parent_pid != 0) {
+		space_pad(depth);
+		printf("  parent:\n");
+		if (process_pid(ret.parent_pid, 0, 0, 0, depth + 4))
+			return (1);
+	}
+	if (process_children && ret.childrenlen != 0) {
+		space_pad(depth);
+		printf("  children:\n");
+		i = 0;
+		while (i < ret.childrenlen) {
+			if (process_pid(ret.children[i], 1, 0, 0, depth + 4))
+				return (1);
+			i++;
+		}
+	}
+	free(ret.children);
+	return (0);
+}
+
 int main(int argc, char **argv)
 {
 	char name[1024];
-	struct pid_info ret;
 	int pid;
 	int i;
 
@@ -119,27 +181,7 @@ int main(int argc, char **argv)
 		pid = atoi(argv[1]);
 	else
 		pid = getpid();
-
+	process_pid(pid, 1, 1, 1, 0);
 	// TODO: Check errno, use perror, etc...
-	if (get_pid_info(&ret, pid)) {
-		perror("get_pid_info");
-		return 1;
-	}
-	printf("pid = %d\n", ret.pid);
-	printf("state = %s\n", str_from_task_state(ret.state));
-	printf("age = %lluns\n", ret.age);
-	printf("parent_pid = %s(%d)\n", get_process_name_by_pid(ret.parent_pid, name), ret.parent_pid);
-	printf("path = %.*s\n", PATH_MAX, ret.path);
-	printf("pwd = %.*s\n", PATH_MAX, ret.pwd);
-	printf("children:\n");
-	i = 0;
-	while (i < 128 && ret.children[i] != 0) {
-		printf("- %s(%d)\n", get_process_name_by_pid(ret.children[i], name), ret.children[i]);
-		i++;
-	}
-	printf("stackptr = %p\n", ret.stack); // TODO: Hex dump - How do we know the end ?
-	if (ret.stack)
-		hexDump("stack", ret.stack, 0x21000);
-		hexDump("stack", ret.stack, ret.stacklen);
 	return 0;
 }

@@ -12,8 +12,8 @@ struct pid_info {
 	size_t stacklen;
 	char __user *stack;
 	unsigned long long age;
-	// TODO: Figure out a good maxlen for children
-	int children[128];
+	size_t childrenlen;
+	int __user *children;
 	int parent_pid;
 	char path[PATH_MAX];
 	char pwd[PATH_MAX];
@@ -146,19 +146,27 @@ SYSCALL_DEFINE2(get_pid_info, struct pid_info __user *, ref, int, pid)
 		res = PTR_ERR(info->stack);
 		goto cleanup;
 	}
+
+	/* It's impossible (or at least hard) to allocate memory for userspace from
+	 * kernelspace. So instead, we ask the user to provide a userspace-allocated
+	 * array for us to put the pid list into.
+	 */
 	list_for_each(list, &task->children) {
-		if (i >= 127)
+		if (i >= info->childrenlen)
 			break;
 
 		child_task = list_entry(list, struct task_struct, sibling);
 		/*
 		 * RCU/RC follows a similar reasoning to the parent.
 		 */
-		info->children[i] = task_pid_vnr(child_task);
-		if (info->children[i])
-			i++;
+		pid = task_pid_vnr(child_task);
+		if (copy_to_user(info->children + i, &pid, sizeof(int)) != 0) {
+			res = -EINVAL;
+			goto cleanup;
+		}
+		i++;
 	}
-	info->children[i] = 0;
+	info->childrenlen = i;
 
 	/*
 	 * Again for Rc, we're handling this through the task reference.
