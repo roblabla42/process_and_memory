@@ -6,7 +6,8 @@
 struct pid_info {
 	int pid;
 	int state;
-	void *stack;
+	size_t stacklen;
+	char *stack;
 	unsigned long long age;
 	// TODO: Figure out a good maxlen for children
 	int children[128];
@@ -139,5 +140,6 @@ int main(int argc, char **argv)
 	printf("stackptr = %p\n", ret.stack); // TODO: Hex dump - How do we know the end ?
 	if (ret.stack)
 		hexDump("stack", ret.stack, 0x21000);
+		hexDump("stack", ret.stack, ret.stacklen);
 	return 0;
 }
